@@ -1,10 +1,11 @@
 import { HelloWorldServer } from "./server"
 import { HelloWorldClient } from "./client"
+import { ChatCLI } from "./chat"
 
 async function run() {
   console.log("=== MCP Hello World Demo ===\n");
 
-    // Demo client usage
+  // Demo client usage
   console.log("\nSetting up MCP Client...");
   const client = new HelloWorldClient();
   
@@ -30,6 +31,7 @@ async function run() {
   }
 }
 
+
 // For running as separate server process:
 if (require.main === module) {
   if (process.argv[2] === "server") {
@@ -37,9 +39,13 @@ if (require.main === module) {
     server.start().catch(console.error);
   } else if (process.argv[2] === "client") {
     run().catch(console.error);
+  } else if (process.argv[2] === "chat") {
+    const chatCLI = new ChatCLI();
+    chatCLI.start().catch(console.error);
   } else {
     console.log("Usage:");
-    console.log("  node dist/index.js server  # Run as MCP server");
-    console.log("  node dist/index.js client  # Run demo client");
+    console.log("  npm run mcp  # Run as MCP client/server demo");
+    console.log("  npm run chat # Run interactive chat CLI demo");
   }
 }
+

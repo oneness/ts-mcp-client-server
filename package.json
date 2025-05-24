@@ -6,7 +6,8 @@
     "scripts": {
         "test": "echo \"Error: no test specified\" && exit 1",
         "build": "tsc",
-        "mcp": "node dist/index.js client"
+        "mcp": "node dist/index.js client",
+        "chat": "node dist/index.js chat"
     },
     "author": "Kasim Tuman",
     "license": "MIT",
