@@ -1,5 +1,8 @@
+import dotenv from 'dotenv';
 import { LLM } from "./llm";
 import * as readline from 'readline';
+
+dotenv.config({ path: '.env.local' });
 
 class ChatCLI {
   private rl: readline.Interface;
@@ -11,7 +14,7 @@ class ChatCLI {
       output: process.stdout
     });
     
-    this.llm = new LLM();
+    this.llm = new LLM(process.env.ANTHROPIC_API_KEY!);
   }
 
   async start() {

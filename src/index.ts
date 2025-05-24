@@ -1,5 +1,5 @@
-import { HelloWorldServer } from "./server"
-import { HelloWorldClient } from "./client"
+import { MCPServer } from "./server"
+import { MCPClient } from "./client"
 import { ChatCLI } from "./chat"
 
 async function run() {
@@ -7,7 +7,7 @@ async function run() {
 
   // Demo client usage
   console.log("\nSetting up MCP Client...");
-  const client = new HelloWorldClient();
+  const client = new MCPClient();
   
   try {
     await client.connect();
@@ -35,7 +35,7 @@ async function run() {
 // For running as separate server process:
 if (require.main === module) {
   if (process.argv[2] === "server") {
-    const server = new HelloWorldServer();
+    const server = new MCPServer();
     server.start().catch(console.error);
   } else if (process.argv[2] === "client") {
     run().catch(console.error);

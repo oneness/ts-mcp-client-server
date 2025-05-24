@@ -8,7 +8,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 
 
-class HelloWorldClient {
+class MCPClient {
   private client: Client;
 
   constructor() {
@@ -82,4 +82,4 @@ class HelloWorldClient {
   }
 }
 
-export { HelloWorldClient };
+export { MCPClient };

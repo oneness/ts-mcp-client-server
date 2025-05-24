@@ -15,7 +15,7 @@ import {
 // =============================================================================
 
 
-class HelloWorldServer {
+class MCPServer {
   private server: Server;
 
   constructor() {
@@ -104,4 +104,4 @@ class HelloWorldServer {
   }
 }
 
-export { HelloWorldServer };
+export { MCPServer };
