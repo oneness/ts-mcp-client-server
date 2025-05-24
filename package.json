@@ -1,0 +1,20 @@
+{
+    "name": "ts-mcp-client-server",
+    "version": "1.0.0",
+    "description": "Hello world MCP client and server",
+    "main": "index.js",
+    "scripts": {
+        "test": "echo \"Error: no test specified\" && exit 1",
+        "build": "tsc",
+        "mcp": "node dist/index.js client"
+    },
+    "author": "Kasim Tuman",
+    "license": "MIT",
+    "dependencies": {
+        "@modelcontextprotocol/sdk": "^1.12.0"
+    },
+    "devDependencies": {
+        "@types/node": "^22.15.21",
+        "typescript": "^5.8.3"
+    }
+}
