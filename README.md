@@ -32,8 +32,8 @@ npm run chat
 ```
 
 ## TODO
-- [ ] Blog about how MCP works as a standalone client/server and with LLM
-
+- [x] [Blog about how MCP works as a standalone client/server and with
+      LLM](https://www.birkey.co/2025-05-25-mcp-explained-with-code.html)
 
 **NOTE:** Used Claude and Gemini web chat interface to generate some
 boiler plate code.
