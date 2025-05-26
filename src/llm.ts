@@ -148,6 +148,8 @@ Use tools when appropriate to answer user questions. You can call multiple tools
           tools: tools.length > 0 ? tools : undefined,
         });
 
+        console.log(`finalCompletion after tool use: `, JSON.stringify(finalCompletion, null, 2));
+
         // Extract text from final response
         finalResponse = "";
         for (const content of finalCompletion.content) {
@@ -155,6 +157,8 @@ Use tools when appropriate to answer user questions. You can call multiple tools
             finalResponse += content.text;
           }
         }
+
+        console.log(`finalResponse after tool use: `, finalResponse);
 
         this.conversationHistory.push({
           role: "assistant",
