@@ -57,10 +57,12 @@ class ChatCLI {
       }
       
       try {
-        const response = await this.llm.processMessage(trimmedInput);
+        // Use complex query method for better multi-tool handling
+        const response = await this.llm.processComplexQuery(trimmedInput, 5);
         console.log(`\nLLM: ${response}\n`);
       } catch (error) {
         console.error("❌ Error processing message:", error);
+        console.error("Error details:", error.message);
       }
       
       this.chatLoop();

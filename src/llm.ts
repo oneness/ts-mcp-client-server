@@ -13,6 +13,7 @@ class LLM {
   private anthropic: Anthropic;
   private conversationHistory: Anthropic.Messages.MessageParam[] = [];
   private systemPrompt: string = "";
+  private verboseLogging: boolean = true;
 
   constructor(apiKey: string) {
     this.mcpClient = new MCPClient();
@@ -45,6 +46,12 @@ class LLM {
 Available tools:
 ${toolDescriptions}
 
+IMPORTANT LOGGING INSTRUCTIONS:
+- Use the get_logging_mode tool to check the current logging setting
+- If logging mode is "verbose": Show detailed steps, tool executions, and reasoning process
+- If logging mode is "quiet": Provide only the final answer without showing intermediate steps
+- Users can change the logging mode with set_logging_mode tool
+
 Use tools when appropriate to answer user questions. You can call multiple tools in sequence if needed.`;
   }
 
@@ -67,13 +74,18 @@ Use tools when appropriate to answer user questions. You can call multiple tools
   }
 
   async processMessage(userMessage: string): Promise<string> {
-    console.log(`\n🤖 Processing: "${userMessage}"`);
+    // Check current logging mode from server
+    await this.syncLoggingMode();
+    
+    this.log(`\n🤖 Processing: "${userMessage}"`);
     
     // Add user message to conversation
     this.conversationHistory.push({
       role: "user",
       content: userMessage
     });
+
+    this.log(`📋 Conversation history length before processing: ${this.conversationHistory.length}`);
 
     try {
       // Prepare tools for Claude
@@ -88,21 +100,37 @@ Use tools when appropriate to answer user questions. You can call multiple tools
         tools: tools.length > 0 ? tools : undefined,
       });
 
-      console.log(`🧠 Claude response:`, JSON.stringify(response, null, 2));
+      this.log(`🧠 Claude response:`, JSON.stringify(response, null, 2));
 
       // Process the response
       let finalResponse = "";
       const toolResults: MCPToolResult[] = [];
 
-      // Handle different content types
+      // Collect tool uses and text content
+      const toolUses: any[] = [];
       for (const content of response.content) {
         if (content.type === 'text') {
           finalResponse += content.text;
         } else if (content.type === 'tool_use') {
-          console.log(`🔧 Claude wants to use tool: ${content.name} with args:`, content.input);
+          toolUses.push(content);
+        }
+      }
+
+      // Process all tool uses
+      if (toolUses.length > 0) {
+        // Add the assistant message with tool_use content to history
+        this.conversationHistory.push({
+          role: "assistant",
+          content: response.content
+        });
+
+        // Execute all tools and collect results
+        const toolResultsForMessage: any[] = [];
+        for (const toolUse of toolUses) {
+          this.log(`🔧 Claude wants to use tool: ${toolUse.name} with args:`, toolUse.input);
           
           // Call the MCP tool
-          const mcpResult = await this.mcpClient.callTool(content.name, content.input);
+          const mcpResult = await this.mcpClient.callTool(toolUse.name, toolUse.input);
           
           let toolResultText = "No result";
           if (mcpResult && mcpResult.content) {
@@ -113,32 +141,29 @@ Use tools when appropriate to answer user questions. You can call multiple tools
           }
 
           toolResults.push({
-            tool: content.name,
+            tool: toolUse.name,
             result: toolResultText
           });
 
-          // Add tool result to conversation for Claude's next response
-          this.conversationHistory.push({
-            role: "assistant",
-            content: response.content
-          });
-
-          this.conversationHistory.push({
-            role: "user",
-            content: [
-              {
-                type: "tool_result",
-                tool_use_id: content.id,
-                content: toolResultText
-              }
-            ]
+          // Add tool result for this specific tool use
+          toolResultsForMessage.push({
+            type: "tool_result",
+            tool_use_id: toolUse.id,
+            content: toolResultText
           });
         }
+
+        // Add all tool results in a single user message
+        this.conversationHistory.push({
+          role: "user",
+          content: toolResultsForMessage
+        });
       }
 
       // If we used tools, get Claude's final response incorporating the results
-      if (toolResults.length > 0) {
-        console.log(`📊 Tool results:`, toolResults);
+      if (toolUses.length > 0) {
+        this.log(`📊 Tool results:`, toolResults);
+        this.log(`📋 Conversation history before final completion:`, JSON.stringify(this.conversationHistory, null, 2));
         
         const finalCompletion = await this.anthropic.messages.create({
           model: "claude-3-5-sonnet-20241022",
@@ -148,17 +173,32 @@ Use tools when appropriate to answer user questions. You can call multiple tools
           tools: tools.length > 0 ? tools : undefined,
         });
 
-        console.log(`finalCompletion after tool use: `, JSON.stringify(finalCompletion, null, 2));
+        this.log(`finalCompletion after tool use: `, JSON.stringify(finalCompletion, null, 2));
 
-        // Extract text from final response
-        finalResponse = "";
-        for (const content of finalCompletion.content) {
-          if (content.type === 'text') {
-            finalResponse += content.text;
+        // Check if final completion contains more tool uses (multi-turn scenario)
+        const finalToolUses = finalCompletion.content.filter(c => c.type === 'tool_use');
+        if (finalToolUses.length > 0) {
+          this.log(`⚠️  Final completion contains ${finalToolUses.length} more tool uses - this may require processComplexQuery method`);
+          finalResponse = "Complex multi-tool request detected. Please use the processComplexQuery method for better handling.";
+        } else {
+          // Extract text from final response - keep any initial response text if final is empty
+          let newFinalResponse = "";
+          for (const content of finalCompletion.content) {
+            if (content.type === 'text') {
+              newFinalResponse += content.text;
+            }
+          }
+
+          // If the final completion has text, use it; otherwise keep the original response
+          if (newFinalResponse.trim()) {
+            finalResponse = newFinalResponse;
+          } else if (!finalResponse.trim()) {
+            // If both are empty, provide a default response showing tool results
+            finalResponse = `Tool executed successfully. Results: ${toolResults.map(tr => `${tr.tool}: ${tr.result}`).join('; ')}`;
           }
         }
 
-        console.log(`finalResponse after tool use: `, finalResponse);
+        this.log(`finalResponse after tool use: `, finalResponse);
 
         this.conversationHistory.push({
           role: "assistant",
@@ -246,10 +286,15 @@ Use tools when appropriate to answer user questions. You can call multiple tools
           });
         }
 
-        // Send tool results back to Claude
+        // Send tool results back to Claude - combine tool_use blocks with any text
+        const assistantContent = [...toolCalls];
+        if (fullResponse.trim()) {
+          assistantContent.push({ type: "text", text: fullResponse });
+        }
+        
         this.conversationHistory.push({
           role: "assistant",
-          content: [...toolCalls, { type: "text", text: fullResponse }]
+          content: assistantContent
         });
 
         this.conversationHistory.push({
@@ -295,7 +340,10 @@ Use tools when appropriate to answer user questions. You can call multiple tools
 
   // Method to handle multi-turn tool conversations
   async processComplexQuery(userMessage: string, maxToolRounds: number = 3): Promise<string> {
-    console.log(`\n🤖 Processing complex query: "${userMessage}"`);
+    // Check current logging mode from server
+    await this.syncLoggingMode();
+    
+    this.log(`\n🤖 Processing complex query: "${userMessage}"`);
     
     this.conversationHistory.push({
       role: "user",
@@ -307,6 +355,7 @@ Use tools when appropriate to answer user questions. You can call multiple tools
 
     try {
       while (currentRound < maxToolRounds) {
+        this.log(`🔄 Starting round ${currentRound + 1}/${maxToolRounds}`);
         const tools = this.convertMCPToolsToAnthropicFormat();
         
         const response = await this.anthropic.messages.create({
@@ -324,25 +373,37 @@ Use tools when appropriate to answer user questions. You can call multiple tools
         for (const content of response.content) {
           if (content.type === 'text') {
             finalResponse = content.text;
+            this.log(`📝 Round ${currentRound + 1} - Text response: ${content.text}`);
           } else if (content.type === 'tool_use') {
             hasToolCalls = true;
-            console.log(`🔧 Round ${currentRound + 1} - Tool: ${content.name}`);
+            this.log(`🔧 Round ${currentRound + 1} - Tool: ${content.name} with args:`, content.input);
             
-            const mcpResult = await this.mcpClient.callTool(content.name, content.input);
-            let toolResultText = "No result";
-            
-            if (mcpResult && mcpResult.content) {
-              toolResultText = mcpResult.content
-                .filter(c => c.type === 'text')
-                .map(c => c.text)
-                .join('\n');
-            }
+            try {
+              const mcpResult = await this.mcpClient.callTool(content.name, content.input);
+              let toolResultText = "No result";
+              
+              if (mcpResult && mcpResult.content) {
+                toolResultText = mcpResult.content
+                  .filter(c => c.type === 'text')
+                  .map(c => c.text)
+                  .join('\n');
+              }
 
-            toolResults.push({
-              type: "tool_result",
-              tool_use_id: content.id,
-              content: toolResultText
-            });
+              this.log(`✅ Round ${currentRound + 1} - Tool ${content.name} result: ${toolResultText.substring(0, 200)}...`);
+
+              toolResults.push({
+                type: "tool_result",
+                tool_use_id: content.id,
+                content: toolResultText
+              });
+            } catch (error) {
+              this.log(`❌ Round ${currentRound + 1} - Tool ${content.name} failed:`, error);
+              toolResults.push({
+                type: "tool_result",
+                tool_use_id: content.id,
+                content: `Error executing tool: ${error instanceof Error ? error.message : String(error)}`
+              });
+            }
           }
         }
 
@@ -354,6 +415,7 @@ Use tools when appropriate to answer user questions. You can call multiple tools
 
         if (hasToolCalls) {
           // Add tool results and continue
+          this.log(`🔄 Round ${currentRound + 1} - Adding ${toolResults.length} tool results and continuing...`);
           this.conversationHistory.push({
             role: "user",
             content: toolResults
@@ -361,6 +423,7 @@ Use tools when appropriate to answer user questions. You can call multiple tools
           currentRound++;
         } else {
           // No more tools needed, we're done
+          this.log(`🏁 Round ${currentRound + 1} - No more tools needed, finishing with response: ${finalResponse}`);
           break;
         }
       }
@@ -370,6 +433,46 @@ Use tools when appropriate to answer user questions. You can call multiple tools
     } catch (error) {
       console.error('Error in complex query:', error);
       return "I'm sorry, I encountered an error processing your complex request.";
+    }
+  }
+
+  // Method to set logging mode
+  setVerboseLogging(verbose: boolean) {
+    this.verboseLogging = verbose;
+  }
+
+  // Method to get logging mode
+  getVerboseLogging(): boolean {
+    return this.verboseLogging;
+  }
+
+  // Conditional logging method
+  private log(...args: any[]) {
+    if (this.verboseLogging) {
+      console.log(...args);
+    }
+  }
+
+  // Sync logging mode with server
+  private async syncLoggingMode() {
+    try {
+      const result = await this.mcpClient.callTool("get_logging_mode", {});
+      if (result && result.content && result.content.length > 0) {
+        const response = result.content[0].text as string;
+        if (response && typeof response === 'string') {
+          if (response.includes("verbose")) {
+            this.verboseLogging = true;
+          } else if (response.includes("quiet")) {
+            this.verboseLogging = false;
+          }
+          // Also sync the client logging
+          this.mcpClient.setVerboseLogging(this.verboseLogging);
+        }
+      }
+    } catch (error) {
+      // If we can't get logging mode, default to verbose
+      this.verboseLogging = true;
+      this.mcpClient.setVerboseLogging(true);
     }
   }
 

@@ -10,6 +10,7 @@ import {
 
 class MCPClient {
   private client: Client;
+  private verboseLogging: boolean = true;
 
   constructor() {
     this.client = new Client(
@@ -24,7 +25,7 @@ class MCPClient {
   }
 
   async connect() {
-    console.log("Client connecting to MCP server...");
+    this.log("Client connecting to MCP server...");
     
     try {
       // Connect to the server process via stdio
@@ -34,7 +35,7 @@ class MCPClient {
       });
       
       await this.client.connect(transport);
-      console.log("Connected to MCP server");
+      this.log("Connected to MCP server");
     } catch (error) {
       console.error("Failed to connect to server:", error);
       throw error;
@@ -45,9 +46,9 @@ class MCPClient {
     try {
       const response = await this.client.listTools() as ListToolsResult;
       
-      console.log("Available tools:");
+      this.log("Available tools:");
       response.tools.forEach((tool) => {
-        console.log(`- ${tool.name}: ${tool.description}`);
+        this.log(`- ${tool.name}: ${tool.description}`);
       });
       
       return response.tools;
@@ -64,16 +65,28 @@ class MCPClient {
         arguments: args,
       }) as CallToolResult;
 
-      console.log(`Tool '${name}' response:`);
+      this.log(`Tool '${name}' response:`);
       response.content.forEach((content) => {
         if (content.type === "text") {
-          console.log(content.text);
+          this.log(content.text);
         }
       });
 
       return response;
     } catch (error) {
       console.error(`Error calling tool '${name}':`, error);
+    }
+  }
+
+  // Method to set logging mode
+  setVerboseLogging(verbose: boolean) {
+    this.verboseLogging = verbose;
+  }
+
+  // Conditional logging method
+  private log(...args: any[]) {
+    if (this.verboseLogging) {
+      console.log(...args);
     }
   }
 
