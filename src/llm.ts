@@ -92,11 +92,14 @@ Use tools when appropriate to answer user questions. You can call multiple tools
       const tools = this.convertMCPToolsToAnthropicFormat();
       
       // Get Claude's response
+      const cleanHistory = this.cleanConversationHistory();
+      this.log(`📋 Sending ${cleanHistory.length} messages to Claude (cleaned from ${this.conversationHistory.length})`);
+      
       const response = await this.anthropic.messages.create({
         model: "claude-3-5-sonnet-20241022",
         max_tokens: 1000,
         system: this.systemPrompt,
-        messages: this.conversationHistory,
+        messages: cleanHistory,
         tools: tools.length > 0 ? tools : undefined,
       });
 
@@ -163,13 +166,14 @@ Use tools when appropriate to answer user questions. You can call multiple tools
       // If we used tools, get Claude's final response incorporating the results
       if (toolUses.length > 0) {
         this.log(`📊 Tool results:`, toolResults);
-        this.log(`📋 Conversation history before final completion:`, JSON.stringify(this.conversationHistory, null, 2));
+        const cleanHistoryForFinal = this.cleanConversationHistory();
+        this.log(`📋 Conversation history before final completion: ${cleanHistoryForFinal.length} messages`);
         
         const finalCompletion = await this.anthropic.messages.create({
           model: "claude-3-5-sonnet-20241022",
           max_tokens: 1000,
           system: this.systemPrompt,
-          messages: this.conversationHistory,
+          messages: cleanHistoryForFinal,
           tools: tools.length > 0 ? tools : undefined,
         });
 
@@ -358,11 +362,15 @@ Use tools when appropriate to answer user questions. You can call multiple tools
         this.log(`🔄 Starting round ${currentRound + 1}/${maxToolRounds}`);
         const tools = this.convertMCPToolsToAnthropicFormat();
         
+        // Clean conversation history before sending
+        const cleanHistory = this.cleanConversationHistory();
+        this.log(`📋 Sending ${cleanHistory.length} messages to Claude (cleaned from ${this.conversationHistory.length})`);
+        
         const response = await this.anthropic.messages.create({
           model: "claude-3-5-sonnet-20241022",
           max_tokens: 1000,
           system: this.systemPrompt,
-          messages: this.conversationHistory,
+          messages: cleanHistory,
           tools: tools.length > 0 ? tools : undefined,
         });
 
@@ -383,10 +391,19 @@ Use tools when appropriate to answer user questions. You can call multiple tools
               let toolResultText = "No result";
               
               if (mcpResult && mcpResult.content) {
-                toolResultText = mcpResult.content
+                const resultTexts = mcpResult.content
                   .filter(c => c.type === 'text')
                   .map(c => c.text)
-                  .join('\n');
+                  .filter(text => text && text.trim().length > 0);
+                
+                if (resultTexts.length > 0) {
+                  toolResultText = resultTexts.join('\n');
+                }
+              }
+
+              // Ensure we have non-empty result text
+              if (!toolResultText || toolResultText.trim().length === 0) {
+                toolResultText = "Tool executed successfully but returned no content";
               }
 
               this.log(`✅ Round ${currentRound + 1} - Tool ${content.name} result: ${toolResultText.substring(0, 200)}...`);
@@ -453,6 +470,11 @@ Use tools when appropriate to answer user questions. You can call multiple tools
     }
   }
 
+  // Sync logging mode with server (public version for external access)
+  async syncLoggingModePublic() {
+    return this.syncLoggingMode();
+  }
+
   // Sync logging mode with server
   private async syncLoggingMode() {
     try {
@@ -484,6 +506,48 @@ Use tools when appropriate to answer user questions. You can call multiple tools
   // Method to get conversation history
   getHistory(): Anthropic.Messages.MessageParam[] {
     return [...this.conversationHistory];
+  }
+
+  // Validate message content is not empty
+  private validateMessage(message: Anthropic.Messages.MessageParam): boolean {
+    if (typeof message.content === 'string') {
+      return message.content.trim().length > 0;
+    } else if (Array.isArray(message.content)) {
+      return message.content.length > 0 && message.content.some(content => {
+        if (content.type === 'text') {
+          return content.text && content.text.trim().length > 0;
+        } else if (content.type === 'tool_result') {
+          return content.content && typeof content.content === 'string' && content.content.trim().length > 0;
+        } else if (content.type === 'tool_use') {
+          return content.name && content.name.trim().length > 0;
+        }
+        return true; // For other content types, assume valid
+      });
+    }
+    return false;
+  }
+
+  // Clean conversation history to remove empty messages
+  private cleanConversationHistory(): Anthropic.Messages.MessageParam[] {
+    const cleaned = this.conversationHistory.filter(message => this.validateMessage(message));
+    
+    // Ensure we don't have consecutive assistant messages or other invalid patterns
+    const result: Anthropic.Messages.MessageParam[] = [];
+    let lastRole: string | null = null;
+    
+    for (const message of cleaned) {
+      // Skip consecutive messages from the same role (except for tool sequences)
+      if (lastRole === message.role && message.role === 'assistant' && 
+          (!Array.isArray(message.content) || 
+          (Array.isArray(message.content) && !message.content.some(c => c.type === 'tool_use')))) {
+        continue;
+      }
+      
+      result.push(message);
+      lastRole = message.role;
+    }
+    
+    return result;
   }
 
   async shutdown() {
